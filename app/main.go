@@ -2,38 +2,43 @@ package main
 
 import (
 	"fmt"
-	"io"
-	"io/ioutil"
 	"os"
 	"os/exec"
-	"path"
 	"syscall"
 )
 
 // Usage: your_docker.sh run <image> <command> <arg1> <arg2> ...
 func main() {
+	if len(os.Args) < 4 {
+		fmt.Println("Not enough arguments, expecting 4")
+		os.Exit(1)
+	}
+
 	command := os.Args[3]
 	args := os.Args[4:len(os.Args)]
 	image := os.Args[2]
 
-	docker := NewDockerAPI(image)
-	err := docker.Auth()
-	if err != nil {
-		fmt.Printf("error authenticating with docker: %v", err)
-	}
-	paths, err := docker.DownloadImage()
-
-	chrootDir, err := ioutil.TempDir("", "")
+	chrootDir, err := os.MkdirTemp("", "chroot")
 	if err != nil {
 		fmt.Printf("error creating chroot dir: %v", err)
 		os.Exit(1)
 	}
+
+	tarDir, err := os.MkdirTemp("", "tarDir")
+	if err != nil {
+		fmt.Printf("error creating temp folder for tar files: %v", err)
+		os.Exit(1)
+	}
+
+	defer cleanUp(chrootDir, tarDir)
 
 	err = copyExecutableIntoDir(chrootDir, command)
 	if err != nil {
 		fmt.Printf("error copying executable into chroot dir: %v", err)
 		os.Exit(1)
 	}
+
+	paths := fetchDockerImageIntoDir(image, tarDir)
 
 	err = extractTarsToDir(chrootDir, paths)
 	if err != nil {
@@ -73,55 +78,41 @@ func main() {
 	}
 }
 
-func copyExecutableIntoDir(chrootDir string, executablePath string) error {
-	executablePathInChrootDir := path.Join(chrootDir, executablePath)
-
-	err := os.MkdirAll(path.Dir(executablePathInChrootDir), 0750)
+func cleanUp(chrootDir, tarDir string) {
+	err := os.RemoveAll(tarDir)
 	if err != nil {
-		return err
+		fmt.Printf("error removing tarDir: %v", err)
+		os.Exit(1)
 	}
 
-	return copyFile(executablePath, executablePathInChrootDir)
+	err = os.RemoveAll(chrootDir)
+	if err != nil {
+		fmt.Printf("error removing chrootDir: %v", err)
+		os.Exit(1)
+	}
 }
 
-func copyFile(sourceFilePath, destinationFilePath string) error {
-	sourceFileStat, err := os.Stat(sourceFilePath)
+func fetchDockerImageIntoDir(image, tarDir string) []string {
+	repo, ref := parseImage(image)
+	token, err := authenticateWithDockerRegistry(repo)
 	if err != nil {
-		return err
+		fmt.Printf("error pulling authenticating with docker registry: %v", err)
+		os.Exit(1)
 	}
 
-	sourceFile, err := os.Open(sourceFilePath)
+	dockerClient := NewDockerClient(repo, ref, token)
+
+	manifest, err := dockerClient.PullImageManifest()
 	if err != nil {
-		return err
+		fmt.Printf("error pulling image manifest: %v", err)
+		os.Exit(1)
 	}
-	defer sourceFile.Close()
 
-	destinationFile, err := os.OpenFile(destinationFilePath, os.O_RDWR|os.O_CREATE, sourceFileStat.Mode())
+	tars, err := dockerClient.PullImageLayers(manifest, tarDir)
 	if err != nil {
-		return err
-	}
-	defer destinationFile.Close()
-
-	_, err = io.Copy(destinationFile, sourceFile)
-	return err
-}
-
-func createDevNull(chrootDir string) error {
-	if err := os.MkdirAll(path.Join(chrootDir, "dev"), 0750); err != nil {
-		return err
+		fmt.Printf("error pulling image layers: %v", err)
+		os.Exit(1)
 	}
 
-	return ioutil.WriteFile(path.Join(chrootDir, "dev", "null"), []byte{}, 0644)
-}
-
-func extractTarsToDir(chootDir string, paths []string) error {
-	for _, path := range paths {
-		fmt.Printf("\tExtracting '%s'\n", path)
-		cmd := exec.Command("tar", "xf", path, "-C", chootDir)
-		err := cmd.Run()
-		if err != nil {
-			return err
-		}
-	}
-	return nil
+	return tars
 }

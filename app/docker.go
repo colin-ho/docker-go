@@ -2,61 +2,19 @@ package main
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"net/http"
 	"os"
 	"path"
-	"strings"
 )
-
-type DockerAPI struct {
-	repo      string
-	ref       string
-	authToken string
-}
-
-func NewDockerAPI(image string) *DockerAPI {
-	parts := strings.Split(image, ":")
-	repo := parts[0]
-	ref := "latest"
-	if len(parts) == 2 {
-		ref = parts[1]
-	}
-	if !strings.Contains(repo, "/") {
-		repo = "library/" + repo
-	}
-	return &DockerAPI{
-		ref:  ref,
-		repo: repo,
-	}
-}
 
 type dockerAuthResp struct {
 	Token string
 }
 
-func (docker *DockerAPI) Auth() error {
-	authUrl := fmt.Sprintf("https://auth.docker.io/token?service=registry.docker.io&scope=repository:%s:pull", docker.repo)
-	resp, err := http.Get(authUrl)
-	if err != nil {
-		return err
-	}
-	body, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return err
-	}
-	var authResp dockerAuthResp
-	err = json.Unmarshal(body, &authResp)
-	if err != nil {
-		return err
-	}
-	docker.authToken = authResp.Token
-	return nil
-}
-
-type imageManifest struct {
+type dockerImageManifest struct {
 	Name     string
 	Tag      string
 	FsLayers []struct {
@@ -64,89 +22,64 @@ type imageManifest struct {
 	}
 }
 
-func (docker *DockerAPI) GetManifest() (*imageManifest, error) {
-	url := fmt.Sprintf("https://registry.hub.docker.com/v2/%s/manifests/%s", docker.repo, docker.ref)
-	req, err := http.NewRequest("GET", url, nil)
+type DockerClient struct {
+	repo  string
+	ref   string
+	token string
+}
+
+func NewDockerClient(repo, ref, token string) *DockerClient {
+	return &DockerClient{
+		repo:  repo,
+		ref:   ref,
+		token: token,
+	}
+}
+
+func (dockerClient *DockerClient) PullImageManifest() (*dockerImageManifest, error) {
+	url := fmt.Sprintf("https://registry.hub.docker.com/v2/%s/manifests/%s", dockerClient.repo, dockerClient.ref)
+
+	resp, err := dockerClient.authenticatedRequest(url)
 	if err != nil {
 		return nil, err
 	}
-	if err = docker.addAuthHeader(req); err != nil {
-		return nil, err
-	}
-	client := http.DefaultClient
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
+
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
 	}
-	var manifest imageManifest
+
+	var manifest dockerImageManifest
 	if err = json.Unmarshal(body, &manifest); err != nil {
 		return nil, err
 	}
 	return &manifest, nil
 }
 
-func (docker *DockerAPI) GetBlobResp(blob string) (*http.Response, error) {
-	url := fmt.Sprintf("https://registry.hub.docker.com/v2/%s/blobs/%s", docker.repo, blob)
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return nil, err
-	}
-	if err = docker.addAuthHeader(req); err != nil {
-		return nil, err
-	}
-	client := http.DefaultClient
-	return client.Do(req)
-}
-
-func (docker *DockerAPI) DownloadImage() ([]string, error) {
-	manifest, err := docker.GetManifest()
-	fmt.Println("Getting manifest")
-	if err != nil {
-		return nil, err
-	}
+func (dockerClient *DockerClient) PullImageLayers(manifest *dockerImageManifest, tarDir string) ([]string, error) {
 	var paths []string
 	for _, layer := range manifest.FsLayers {
-		blob := layer.BlobSum
-		path, err := ensureLayerDownloaded(docker, blob)
+		blobSum := layer.BlobSum
+		destPath := path.Join(tarDir, blobSum)
+
+		err := dockerClient.PullLayer(destPath, blobSum)
 		if err != nil {
 			return nil, err
 		}
-		paths = append(paths, path)
+
+		paths = append(paths, destPath)
 	}
 	return paths, nil
 }
 
-func (docker *DockerAPI) addAuthHeader(req *http.Request) error {
-	req.Header.Add("Authorization", "Bearer "+docker.authToken)
-	return nil
-}
-
-func ensureLayerDownloaded(docker *DockerAPI, blobsum string) (string, error) {
-	destPath := path.Join(os.TempDir(), "mydocker", "layers", blobsum)
-	_, err := os.Stat(destPath)
-	fmt.Printf("Checking %s\n", destPath)
+func (dockerClient *DockerClient) PullLayer(destPath, blobSum string) error {
+	err := os.MkdirAll(path.Dir(destPath), 0750)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			if err = downloadLayer(docker, destPath, blobsum); err != nil {
-				return "", err
-			}
-		} else {
-			return "", err
-		}
-	}
-	return destPath, nil
-}
-
-func downloadLayer(docker *DockerAPI, destPath, blobsum string) error {
-	fmt.Printf("Downloading layer '%s'\n", blobsum)
-	if err := os.MkdirAll(path.Dir(destPath), 0750); err != nil {
 		return err
 	}
-	resp, err := docker.GetBlobResp(blobsum)
+
+	url := fmt.Sprintf("https://registry.hub.docker.com/v2/%s/blobs/%s", dockerClient.repo, blobSum)
+	resp, err := dockerClient.authenticatedRequest(url)
 	if err != nil {
 		return err
 	}
@@ -158,5 +91,17 @@ func downloadLayer(docker *DockerAPI, destPath, blobsum string) error {
 	}
 	defer f.Close()
 
+	io.Copy(f, resp.Body)
 	return nil
+}
+
+func (dockerClient *DockerClient) authenticatedRequest(url string) (*http.Response, error) {
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Add("Authorization", "Bearer "+dockerClient.token)
+
+	client := http.DefaultClient
+	return client.Do(req)
 }
