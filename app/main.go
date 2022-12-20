@@ -14,6 +14,14 @@ import (
 func main() {
 	command := os.Args[3]
 	args := os.Args[4:len(os.Args)]
+	image := os.Args[2]
+
+	docker := NewDockerAPI(image)
+	err := docker.Auth()
+	if err != nil {
+		fmt.Printf("error authenticating with docker: %v", err)
+	}
+	paths, err := docker.DownloadImage()
 
 	chrootDir, err := ioutil.TempDir("", "")
 	if err != nil {
@@ -24,6 +32,12 @@ func main() {
 	err = copyExecutableIntoDir(chrootDir, command)
 	if err != nil {
 		fmt.Printf("error copying executable into chroot dir: %v", err)
+		os.Exit(1)
+	}
+
+	err = extractTarsToDir(chrootDir, paths)
+	if err != nil {
+		fmt.Printf("error copying tars into chroot dir: %v", err)
 		os.Exit(1)
 	}
 
@@ -98,4 +112,16 @@ func createDevNull(chrootDir string) error {
 	}
 
 	return ioutil.WriteFile(path.Join(chrootDir, "dev", "null"), []byte{}, 0644)
+}
+
+func extractTarsToDir(chootDir string, paths []string) error {
+	for _, path := range paths {
+		fmt.Printf("\tExtracting '%s'\n", path)
+		cmd := exec.Command("tar", "xf", path, "-C", chootDir)
+		err := cmd.Run()
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
