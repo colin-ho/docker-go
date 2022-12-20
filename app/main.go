@@ -1,6 +1,8 @@
 package main
 
 import (
+	"codecrafters-docker-go/app/client"
+	"codecrafters-docker-go/app/utils"
 	"fmt"
 	"os"
 	"os/exec"
@@ -32,7 +34,7 @@ func main() {
 
 	defer cleanUp(chrootDir, tarDir)
 
-	err = copyExecutableIntoDir(chrootDir, command)
+	err = utils.CopyExecutableIntoDir(chrootDir, command)
 	if err != nil {
 		fmt.Printf("error copying executable into chroot dir: %v", err)
 		os.Exit(1)
@@ -40,14 +42,14 @@ func main() {
 
 	paths := fetchDockerImageIntoDir(image, tarDir)
 
-	err = extractTarsToDir(chrootDir, paths)
+	err = utils.ExtractTarsToDir(chrootDir, paths)
 	if err != nil {
 		fmt.Printf("error copying tars into chroot dir: %v", err)
 		os.Exit(1)
 	}
 
 	// Create /dev/null so that cmd.Run() doesn't complain
-	err = createDevNull(chrootDir)
+	err = utils.CreateDevNull(chrootDir)
 	if err != nil {
 		fmt.Printf("error creating /dev/null: %v", err)
 		os.Exit(1)
@@ -93,14 +95,14 @@ func cleanUp(chrootDir, tarDir string) {
 }
 
 func fetchDockerImageIntoDir(image, tarDir string) []string {
-	repo, ref := parseImage(image)
-	token, err := authenticateWithDockerRegistry(repo)
+	repo, ref := utils.ParseImage(image)
+	token, err := utils.AuthenticateWithDockerRegistry(repo)
 	if err != nil {
 		fmt.Printf("error pulling authenticating with docker registry: %v", err)
 		os.Exit(1)
 	}
 
-	dockerClient := NewDockerClient(repo, ref, token)
+	dockerClient := client.NewDockerClient(repo, ref, token)
 
 	manifest, err := dockerClient.PullImageManifest()
 	if err != nil {

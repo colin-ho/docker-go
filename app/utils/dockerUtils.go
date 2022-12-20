@@ -1,4 +1,4 @@
-package main
+package utils
 
 import (
 	"encoding/json"
@@ -8,7 +8,11 @@ import (
 	"strings"
 )
 
-func parseImage(image string) (string, string) {
+type dockerAuthResp struct {
+	Token string
+}
+
+func ParseImage(image string) (string, string) {
 	parts := strings.Split(image, ":")
 	repo := "library/" + parts[0]
 	ref := "latest"
@@ -18,7 +22,7 @@ func parseImage(image string) (string, string) {
 	return repo, ref
 }
 
-func authenticateWithDockerRegistry(repo string) (string, error) {
+func AuthenticateWithDockerRegistry(repo string) (string, error) {
 	authUrl := fmt.Sprintf("https://auth.docker.io/token?service=registry.docker.io&scope=repository:%s:pull", repo)
 
 	resp, err := http.Get(authUrl)

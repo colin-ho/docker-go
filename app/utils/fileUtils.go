@@ -1,4 +1,4 @@
-package main
+package utils
 
 import (
 	"io"
@@ -8,7 +8,7 @@ import (
 	"path"
 )
 
-func copyExecutableIntoDir(chrootDir string, executablePath string) error {
+func CopyExecutableIntoDir(chrootDir string, executablePath string) error {
 	executablePathInChrootDir := path.Join(chrootDir, executablePath)
 
 	err := os.MkdirAll(path.Dir(executablePathInChrootDir), 0750)
@@ -41,7 +41,7 @@ func copyFile(sourceFilePath, destinationFilePath string) error {
 	return err
 }
 
-func createDevNull(chrootDir string) error {
+func CreateDevNull(chrootDir string) error {
 	if err := os.MkdirAll(path.Join(chrootDir, "dev"), 0750); err != nil {
 		return err
 	}
@@ -49,7 +49,7 @@ func createDevNull(chrootDir string) error {
 	return ioutil.WriteFile(path.Join(chrootDir, "dev", "null"), []byte{}, 0644)
 }
 
-func extractTarsToDir(chootDir string, paths []string) error {
+func ExtractTarsToDir(chootDir string, paths []string) error {
 	for _, path := range paths {
 		cmd := exec.Command("tar", "xf", path, "-C", chootDir)
 		err := cmd.Run()

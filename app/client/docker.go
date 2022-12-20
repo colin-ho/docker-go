@@ -10,10 +10,6 @@ import (
 	"path"
 )
 
-type dockerAuthResp struct {
-	Token string
-}
-
 type dockerImageManifest struct {
 	Name     string
 	Tag      string
