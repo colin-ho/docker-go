@@ -21,18 +21,21 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err = copyExecutableIntoDir(chrootDir, command); err != nil {
+	err = copyExecutableIntoDir(chrootDir, command)
+	if err != nil {
 		fmt.Printf("error copying executable into chroot dir: %v", err)
 		os.Exit(1)
 	}
 
 	// Create /dev/null so that cmd.Run() doesn't complain
-	if err = createDevNull(chrootDir); err != nil {
+	err = createDevNull(chrootDir)
+	if err != nil {
 		fmt.Printf("error creating /dev/null: %v", err)
 		os.Exit(1)
 	}
 
-	if err = syscall.Chroot(chrootDir); err != nil {
+	err = syscall.Chroot(chrootDir)
+	if err != nil {
 		fmt.Printf("chroot err: %v", err)
 		os.Exit(1)
 	}
@@ -41,6 +44,9 @@ func main() {
 
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		Cloneflags: syscall.CLONE_NEWPID,
+	}
 
 	err = cmd.Run()
 	exitErr, ok := err.(*exec.ExitError)
@@ -56,7 +62,8 @@ func main() {
 func copyExecutableIntoDir(chrootDir string, executablePath string) error {
 	executablePathInChrootDir := path.Join(chrootDir, executablePath)
 
-	if err := os.MkdirAll(path.Dir(executablePathInChrootDir), 0750); err != nil {
+	err := os.MkdirAll(path.Dir(executablePathInChrootDir), 0750)
+	if err != nil {
 		return err
 	}
 
